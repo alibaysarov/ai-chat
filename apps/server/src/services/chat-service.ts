@@ -1,36 +1,18 @@
 import OpenAI from 'openai';
-import type { EasyInputMessage } from 'openai/resources/responses/responses';
 import pRetry, { AbortError } from 'p-retry';
-import {
-  MAX_CONTEXT_TOKENS,
-  err,
-  ok,
-  type ChatMessage,
-  type Result,
-} from '@ai-chat/shared';
+import { err, ok, type ChatMessage, type MessageRole, type Result } from '@ai-chat/shared';
 import { aiClient } from '../lib/ai-client';
-import { db } from '../lib/db';
 import { buildChatSystemPrompt } from '../prompts/chat-system';
+import type { IConversationRepository, IMessageRepository } from '../repositories/interfaces';
+import { mapServiceError, toInputMessage, trimHistoryToWindow } from './helpers';
+import type { IChatService, StreamChatRequest, StreamChatResponse, ChatServiceError } from './interfaces/chat-service.interface';
+
+// Re-export types for backward compatibility
+export type { StreamChatRequest, StreamChatResponse, ChatServiceError } from './interfaces/chat-service.interface';
 
 const CHAT_MODEL = 'gpt-4o-mini';
 const MAX_RETRY_ATTEMPTS = 3;
-const AVG_CHARS_PER_TOKEN = 4;
-
-export interface StreamChatRequest {
-  conversationId: string;
-  content: string;
-  signal?: AbortSignal;
-  onChunk: (content: string) => void;
-}
-
-export interface ChatServiceError {
-  code: string;
-  message: string;
-}
-
-export interface StreamChatResponse {
-  assistantMessage: ChatMessage;
-}
+const HISTORY_LIMIT = 100;
 
 interface UsageStats {
   promptTokens: number;
@@ -38,107 +20,81 @@ interface UsageStats {
   totalTokens: number;
 }
 
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / AVG_CHARS_PER_TOKEN);
-}
+export class ChatService implements IChatService {
+  constructor(
+    private readonly conversationRepo: IConversationRepository,
+    private readonly messageRepo: IMessageRepository,
+  ) {}
 
-function trimHistoryToWindow(
-  history: ChatMessage[],
-  systemPrompt: string,
-  userMessage: string,
-): ChatMessage[] {
-  const baseTokens = estimateTokens(systemPrompt) + estimateTokens(userMessage);
-  const remainingBudget = MAX_CONTEXT_TOKENS - baseTokens;
+  async streamChatResponse(
+    request: StreamChatRequest,
+  ): Promise<Result<StreamChatResponse, ChatServiceError>> {
+    try {
+      const conversation = await this.conversationRepo.upsert(request.conversationId);
 
-  if (remainingBudget <= 0) {
-    return [];
-  }
+      const history = await this.buildInputHistory(
+        conversation.id,
+        request.content,
+      );
 
-  const selected: ChatMessage[] = [];
-  let usedTokens = 0;
+      await this.persistUserMessage(conversation.id, request.content);
 
-  for (let i = history.length - 1; i >= 0; i -= 1) {
-    const message = history[i];
-    const messageTokens = estimateTokens(message.content);
-    if (usedTokens + messageTokens > remainingBudget) {
-      break;
-    }
+      const { responseText, usageStats } = await this.runStreamWithRetry(
+        history,
+        request,
+      );
 
-    selected.unshift(message);
-    usedTokens += messageTokens;
-  }
+      const assistantMessage = await this.persistAssistantMessage(
+        conversation.id,
+        responseText,
+        conversation.title,
+        request.content,
+      );
 
-  return selected;
-}
+      this.logUsage(usageStats);
 
-function toInputMessage(message: ChatMessage): EasyInputMessage {
-  const role = message.role === 'assistant' ? 'assistant' : 'user';
-  return { role, content: message.content };
-}
-
-function mapServiceError(error: unknown): ChatServiceError {
-  if (error instanceof AbortError || (error instanceof Error && error.name === 'AbortError')) {
-    return { code: 'CHAT_ABORTED', message: 'Generation was cancelled.' };
-  }
-
-  if (error instanceof OpenAI.APIError) {
-    if (error.status === 429) {
-      return {
-        code: 'RATE_LIMITED',
-        message: 'The AI provider is rate limited right now. Please try again shortly.',
-      };
-    }
-
-    if (typeof error.status === 'number' && error.status >= 500) {
-      return {
-        code: 'UPSTREAM_UNAVAILABLE',
-        message: 'The AI provider is temporarily unavailable. Please retry in a moment.',
-      };
+      return ok({ assistantMessage });
+    } catch (error: unknown) {
+      return err(mapServiceError(error));
     }
   }
 
-  return {
-    code: 'CHAT_STREAM_FAILED',
-    message: 'Unable to generate a response right now.',
-  };
-}
-
-export async function streamChatResponse(
-  request: StreamChatRequest,
-): Promise<Result<StreamChatResponse, ChatServiceError>> {
-  try {
-    const conversation = await db.conversation.upsert({
-      where: { id: request.conversationId },
-      update: {},
-      create: { id: request.conversationId },
-    });
-
-    const historyMessages = await db.message.findMany({
-      where: { conversationId: conversation.id },
-      orderBy: { createdAt: 'asc' },
-      take: 100,
-    });
-
-    await db.message.create({
-      data: {
-        conversationId: conversation.id,
-        role: 'user',
-        content: request.content,
-      },
-    });
-
+  private async buildInputHistory(
+    conversationId: string,
+    userContent: string,
+  ): Promise<ChatMessage[]> {
     const systemPrompt = buildChatSystemPrompt();
-    const history = trimHistoryToWindow(
-      historyMessages.map((item) => ({
-        id: item.id,
-        role: item.role,
-        content: item.content,
-        createdAt: item.createdAt,
-      })),
-      systemPrompt,
-      request.content,
+    const rawMessages = await this.messageRepo.findByConversation(
+      conversationId,
+      HISTORY_LIMIT,
     );
 
+    const messages: ChatMessage[] = rawMessages.map((item) => ({
+      id: item.id,
+      role: item.role,
+      content: item.content,
+      createdAt: item.createdAt,
+    }));
+
+    return trimHistoryToWindow(messages, systemPrompt, userContent);
+  }
+
+  private async persistUserMessage(
+    conversationId: string,
+    content: string,
+  ): Promise<void> {
+    await this.messageRepo.create({
+      conversationId,
+      role: 'user',
+      content,
+    });
+  }
+
+  private async runStreamWithRetry(
+    history: ChatMessage[],
+    request: StreamChatRequest,
+  ): Promise<{ responseText: string; usageStats: UsageStats | null }> {
+    const systemPrompt = buildChatSystemPrompt();
     let responseText = '';
     const usageState: { value: UsageStats | null } = { value: null };
     let streamedAnyChunk = false;
@@ -149,15 +105,18 @@ export async function streamChatResponse(
         usageState.value = null;
         streamedAnyChunk = false;
 
-        const stream = await aiClient.responses.create({
-          model: CHAT_MODEL,
-          stream: true,
-          instructions: systemPrompt,
-          input: [
-            ...history.map(toInputMessage),
-            { role: 'user', content: request.content },
-          ],
-        }, { signal: request.signal });
+        const stream = await aiClient.responses.create(
+          {
+            model: CHAT_MODEL,
+            stream: true,
+            instructions: systemPrompt,
+            input: [
+              ...history.map(toInputMessage),
+              { role: 'user', content: request.content },
+            ],
+          },
+          { signal: request.signal },
+        );
 
         for await (const event of stream) {
           if (event.type === 'response.output_text.delta') {
@@ -187,55 +146,63 @@ export async function streamChatResponse(
           );
         },
         shouldRetry: (error) => {
-          if (error instanceof AbortError || (error instanceof Error && error.name === 'AbortError')) {
+          if (
+            error instanceof AbortError ||
+            (error instanceof Error && error.name === 'AbortError')
+          ) {
             return false;
           }
-
           if (streamedAnyChunk) {
             return false;
           }
-
           if (error instanceof OpenAI.APIError) {
-            return error.status === 429 || (typeof error.status === 'number' && error.status >= 500);
+            return (
+              error.status === 429 ||
+              (typeof error.status === 'number' && error.status >= 500)
+            );
           }
-
           return false;
         },
       },
     );
 
-    const assistantRecord = await db.message.create({
-      data: {
-        conversationId: conversation.id,
-        role: 'assistant',
-        content: responseText,
-      },
+    return { responseText, usageStats: usageState.value };
+  }
+
+  private async persistAssistantMessage(
+    conversationId: string,
+    content: string,
+    currentTitle: string | null,
+    userContent: string,
+  ): Promise<ChatMessage> {
+    const record = await this.messageRepo.create({
+      conversationId,
+      role: 'assistant',
+      content,
     });
 
-    await db.conversation.update({
-      where: { id: conversation.id },
-      data: {
-        title: conversation.title ?? request.content.slice(0, 80),
-      },
-    });
+    if (!currentTitle) {
+      await this.conversationRepo.updateTitle(
+        conversationId,
+        userContent.slice(0, 80),
+      );
+    }
 
-    if (usageState.value) {
+    return {
+      id: record.id,
+      role: record.role as MessageRole,
+      content: record.content,
+      createdAt: record.createdAt,
+    };
+  }
+
+  private logUsage(usageStats: UsageStats | null): void {
+    if (usageStats) {
       console.info(
-        `[chat-service] usage prompt=${usageState.value.promptTokens} completion=${usageState.value.completionTokens} total=${usageState.value.totalTokens}`,
+        `[chat-service] usage prompt=${usageStats.promptTokens} completion=${usageStats.completionTokens} total=${usageStats.totalTokens}`,
       );
     } else {
       console.info('[chat-service] usage unavailable for this completion');
     }
-
-    return ok({
-      assistantMessage: {
-        id: assistantRecord.id,
-        role: assistantRecord.role,
-        content: assistantRecord.content,
-        createdAt: assistantRecord.createdAt,
-      },
-    });
-  } catch (error: unknown) {
-    return err(mapServiceError(error));
   }
 }

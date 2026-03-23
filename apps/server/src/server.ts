@@ -6,7 +6,14 @@ import {
   clientMessageSchema,
   type ServerMessage,
 } from '@ai-chat/shared';
-import { streamChatResponse } from './services';
+import { db } from './lib/db';
+import { ConversationRepository, MessageRepository } from './repositories';
+import { ChatService } from './services';
+
+const chatService = new ChatService(
+  new ConversationRepository(db),
+  new MessageRepository(db),
+);
 
 function sendMessage(socket: WebSocket, message: ServerMessage): void {
   if (socket.readyState !== WebSocket.OPEN) {
@@ -51,7 +58,7 @@ wss.on('connection', (socket: WebSocket, req) => {
     const abortController = new AbortController();
     activeRequestAbortController = abortController;
 
-    const result = await streamChatResponse({
+    const result = await chatService.streamChatResponse({
       conversationId: parsed.data.payload.conversationId,
       content: parsed.data.payload.content,
       signal: abortController.signal,

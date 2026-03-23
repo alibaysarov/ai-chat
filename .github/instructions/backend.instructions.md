@@ -148,6 +148,92 @@ wss.on('connection', (socket, req) => {
 - Send a `ping` frame on an interval and close idle connections that miss two consecutive `pong` replies.
 - Never broadcast raw user content to other clients without sanitisation.
 
+## Service Layer
+
+- Services contain **business logic only** — no Express `Request`/`Response` types, no direct DB calls.
+- Split public and private methods clearly: public methods form the service API; private methods are internal implementation details.
+- Extract reusable helper functions into separate files under `services/helpers/` — never inline utilities that are used in more than one place.
+- When multiple services share behaviour (e.g., pagination, soft-delete, audit logging), extract a base abstract class and extend it.
+- Apply **SOLID** principles:
+  - **S** — one service, one responsibility (e.g., `ChatService` handles chat flow, not user management).
+  - **O** — extend behaviour via composition or inheritance, not by modifying existing services.
+  - **I** — define narrow interfaces (`IChatService`) rather than fat ones.
+  - **D** — depend on interfaces/abstractions injected via constructor, not on concrete implementations.
+
+```ts
+// services/chat-service.ts
+export class ChatService {
+  constructor(private readonly chatRepo: IChatRepository) {}
+
+  async sendMessage(input: SendMessageInput): Promise<Result<ChatMessage, AppError>> {
+    const processed = this.preprocessContent(input.content); // private helper
+    return this.chatRepo.createMessage({ ...input, content: processed });
+  }
+
+  private preprocessContent(content: string): string {
+    return content.trim();
+  }
+}
+```
+
+### What NOT to do
+
+- **Don't** put all functions in a single file — decompose by responsibility into separate service files.
+- **Don't** make DB queries inside the service — delegate all persistence to a repository.
+- **Don't** import Prisma client or any ORM directly in a service file.
+
+## Repository Layer
+
+- All database operations (queries, mutations, transactions) must live in a **repository** class under `repositories/`.
+- One repository per domain entity: `ChatRepository`, `ConversationRepository`, etc.
+- Define a typed interface for every repository and depend on it in services — never on the concrete class.
+
+```ts
+// repositories/interfaces/chat-repository.interface.ts
+export interface IChatRepository {
+  findById(id: string): Promise<ChatMessage | null>;
+  createMessage(data: CreateMessageData): Promise<Result<ChatMessage, AppError>>;
+  listByConversation(conversationId: string): Promise<ChatMessage[]>;
+}
+```
+
+- Shared query patterns (pagination, soft-delete, findById) can be extracted into a generic `BaseRepository` abstract class and reused via inheritance.
+- Reuse methods from other repositories by injecting them — never duplicate query logic across repositories.
+
+```ts
+// repositories/base.repository.ts
+export abstract class BaseRepository<T> {
+  constructor(protected readonly db: PrismaClient) {}
+
+  protected async findById(model: string, id: string): Promise<T | null> {
+    return (this.db as unknown as Record<string, { findUnique: (args: unknown) => Promise<T | null> }>)[model]
+      .findUnique({ where: { id } });
+  }
+}
+
+// repositories/chat.repository.ts
+export class ChatRepository extends BaseRepository<ChatMessage> implements IChatRepository {
+  async createMessage(data: CreateMessageData): Promise<Result<ChatMessage, AppError>> {
+    // ...
+  }
+}
+```
+
+- Keep file structure flat and predictable:
+
+```
+apps/server/src/
+  repositories/
+    interfaces/         # IChatRepository, IConversationRepository, …
+    base.repository.ts  # shared abstract base
+    chat.repository.ts
+    conversation.repository.ts
+  services/
+    helpers/            # pure helper functions used across services
+    chat-service.ts
+    conversation-service.ts
+```
+
 ## Security Checklist
 
 - Rate-limit all public endpoints with `express-rate-limit`.
