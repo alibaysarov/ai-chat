@@ -1,9 +1,9 @@
 import OpenAI from 'openai';
 import pRetry, { AbortError } from 'p-retry';
-import { err, ok, type ChatMessage, type MessageRole, type Result } from '@ai-chat/shared';
+import { err, ok, type ChatMessage, type MessageRole, type Result, MAX_FILE_CONTEXT_CHARS } from '@ai-chat/shared';
 import { aiClient } from '../lib/ai-client';
 import { buildChatSystemPrompt } from '../prompts/chat-system';
-import type { IConversationRepository, IMessageRepository } from '../repositories/interfaces';
+import type { IConversationRepository, IFileRepository, IMessageRepository } from '../repositories/interfaces';
 import { mapServiceError, toInputMessage, trimHistoryToWindow } from './helpers';
 import type { IChatService, StreamChatRequest, StreamChatResponse, ChatServiceError } from './interfaces/chat-service.interface';
 
@@ -24,6 +24,7 @@ export class ChatService implements IChatService {
   constructor(
     private readonly conversationRepo: IConversationRepository,
     private readonly messageRepo: IMessageRepository,
+    private readonly fileRepo: IFileRepository,
   ) {}
 
   async streamChatResponse(
@@ -32,16 +33,21 @@ export class ChatService implements IChatService {
     try {
       const conversation = await this.conversationRepo.upsert(request.conversationId);
 
+      const fileContext = await this.loadFileContext(request.fileId);
+      const userContent = fileContext
+        ? this.buildFileContext(fileContext.text, fileContext.filename) + '\n' + request.content
+        : request.content;
+
       const history = await this.buildInputHistory(
         conversation.id,
-        request.content,
+        userContent,
       );
 
       await this.persistUserMessage(conversation.id, request.content);
 
       const { responseText, usageStats } = await this.runStreamWithRetry(
         history,
-        request,
+        { ...request, content: userContent },
       );
 
       const assistantMessage = await this.persistAssistantMessage(
@@ -57,6 +63,20 @@ export class ChatService implements IChatService {
     } catch (error: unknown) {
       return err(mapServiceError(error));
     }
+  }
+
+  private async loadFileContext(
+    fileId: string | undefined,
+  ): Promise<{ text: string; filename: string } | null> {
+    if (!fileId) return null;
+    const record = await this.fileRepo.findById(fileId);
+    if (!record) return null;
+    const text = record.extractedText.slice(0, MAX_FILE_CONTEXT_CHARS);
+    return { text, filename: record.originalFilename };
+  }
+
+  private buildFileContext(text: string, filename: string): string {
+    return `[Attached file: ${filename}]\n\n${text}\n\n---\nUser message:`;
   }
 
   private async buildInputHistory(

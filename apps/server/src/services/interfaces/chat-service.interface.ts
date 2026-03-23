@@ -3,6 +3,7 @@ import type { Result, ChatMessage } from '@ai-chat/shared';
 export interface StreamChatRequest {
   conversationId: string;
   content: string;
+  fileId?: string;
   signal?: AbortSignal;
   onChunk: (content: string) => void;
 }

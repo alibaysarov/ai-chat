@@ -4,6 +4,7 @@ export type ClientMessage =
 			payload: {
 				conversationId: string;
 				content: string;
+				fileId?: string;
 			};
 		}
 	| { type: 'ping' };

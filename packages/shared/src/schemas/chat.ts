@@ -21,6 +21,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     payload: z.object({
       conversationId: z.string().min(1),
       content: z.string().min(1).max(MAX_USER_MESSAGE_LENGTH),
+      fileId: z.string().uuid().optional(),
     }),
   }),
   z.object({ type: z.literal('ping') }),

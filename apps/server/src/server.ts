@@ -7,12 +7,13 @@ import {
   type ServerMessage,
 } from '@ai-chat/shared';
 import { db } from './lib/db';
-import { ConversationRepository, MessageRepository } from './repositories';
+import { ConversationRepository, MessageRepository, FileRepository } from './repositories';
 import { ChatService } from './services';
 
 const chatService = new ChatService(
   new ConversationRepository(db),
   new MessageRepository(db),
+  new FileRepository(db),
 );
 
 function sendMessage(socket: WebSocket, message: ServerMessage): void {
@@ -61,6 +62,7 @@ wss.on('connection', (socket: WebSocket, req) => {
     const result = await chatService.streamChatResponse({
       conversationId: parsed.data.payload.conversationId,
       content: parsed.data.payload.content,
+      fileId: parsed.data.payload.fileId,
       signal: abortController.signal,
       onChunk: (content) => {
         sendMessage(socket, {
