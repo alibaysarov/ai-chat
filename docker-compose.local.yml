@@ -1,0 +1,61 @@
+name: ai-chat-local
+
+services:
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: .env.local
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/server/devDockerfile
+    working_dir: /app
+    command: ["sh", "apps/server/scripts/dev-entrypoint.sh"]
+    restart: unless-stopped
+    env_file: .env.local
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/server:/app/apps/server
+      - ./packages/shared:/app/packages/shared
+      # Prevent host node_modules from overriding container's
+      - /app/node_modules
+      - /app/apps/server/node_modules
+    depends_on:
+      database:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/client/devDockerfile
+    working_dir: /app/apps/client
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    restart: unless-stopped
+    env_file: .env.local
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/client:/app/apps/client
+      - ./packages/shared:/app/packages/shared
+      - ./tsconfig.base.json:/app/tsconfig.base.json:ro
+      - /app/node_modules
+      - /app/apps/client/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data_local:

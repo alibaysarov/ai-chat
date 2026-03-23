@@ -1,0 +1,2 @@
+export const MAX_CONTEXT_TOKENS = 6000;
+export const MAX_USER_MESSAGE_LENGTH = 4000;

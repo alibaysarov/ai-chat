@@ -1,0 +1,16 @@
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Copy workspace manifests first for layer caching
+COPY package.json package-lock.json ./
+COPY tsconfig.base.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/server/package.json ./apps/server/
+
+RUN npm ci
+
+# Source is mounted via volume at runtime — no COPY needed
+WORKDIR /app/apps/server
+
+CMD ["npm", "run", "dev"]

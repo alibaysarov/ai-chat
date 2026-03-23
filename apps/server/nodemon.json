@@ -1,0 +1,8 @@
+{
+  "watch": ["src", "../../packages/shared/dist"],
+  "ext": "ts,js,json",
+  "ignore": ["dist", "node_modules"],
+  "exec": "npm exec -- tsx src/server.ts",
+  "legacyWatch": true,
+  "signal": "SIGTERM"
+}
