@@ -14,6 +14,7 @@ interface UseChatSocketOptions {
 interface SendChatInput {
   conversationId: string;
   content: string;
+  fileId?: string;
 }
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -161,6 +162,7 @@ export function useChatSocket(options: UseChatSocketOptions = {}) {
       payload: {
         conversationId: input.conversationId,
         content: input.content,
+        ...(input.fileId !== undefined && { fileId: input.fileId }),
       },
     });
   }, [sendRawMessage]);

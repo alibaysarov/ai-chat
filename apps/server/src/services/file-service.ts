@@ -6,7 +6,7 @@ import { AppError } from '../types/app-error';
 import type { IFileService, UploadFileInput } from './interfaces/file-service.interface';
 
 export class FileService implements IFileService {
-  constructor(private readonly fileRepo: IFileRepository) {}
+  constructor(private readonly fileRepo: IFileRepository) { }
 
   async uploadFile(input: UploadFileInput): Promise<Result<FileUploadResponse, AppError>> {
     try {
@@ -22,6 +22,7 @@ export class FileService implements IFileService {
 
       return ok({ fileId: record.id, filename: record.originalFilename });
     } catch (error: unknown) {
+      console.error(error);
       if (error instanceof AppError) {
         return err(error);
       }

@@ -1,6 +1,15 @@
 name: ai-chat-local
 
 services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Europe/Moscow
+    volumes:
+      - n8n_data:/home/node/.n8n
   database:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -59,3 +68,4 @@ services:
 
 volumes:
   postgres_data_local:
+  n8n_data:

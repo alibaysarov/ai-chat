@@ -12,8 +12,8 @@ You are a senior software architect. Your task is to generate a detailed impleme
 - The output file must start with this exact frontmatter:
   ```
   ---
-  mode: agent
-  model: Claude Sonnet 4.6 (copilot)
+  agent: agent
+  model: Claude Sonnet 4.5 (copilot)
   description: "<one-line description of the feature>"
   ---
   ```

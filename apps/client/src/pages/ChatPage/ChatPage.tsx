@@ -4,7 +4,26 @@ import { Sidebar } from '../../components/Sidebar';
 import { MessageList } from '../../components/MessageList';
 import { Composer } from '../../components/Composer';
 import { useChatSocket } from '../../hooks';
+import { env } from '../../env';
 import styles from './ChatPage.module.css';
+
+async function uploadFile(file: File, conversationId: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('conversationId', conversationId);
+
+  const response = await fetch(`${env.VITE_API_URL}/api/v1/files`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`File upload failed: ${response.status}`);
+  }
+
+  const json = await response.json() as { fileId: string };
+  return json.fileId;
+}
 
 interface Conversation {
   id: string;
@@ -70,20 +89,17 @@ export function ChatPage(): JSX.Element {
     setSocketError(null);
   }, []);
 
-  const handleSend = useCallback((files: File[]) => {
+  const handleSend = useCallback(async (files: File[]) => {
     const text = input.trim();
     if (!text && files.length === 0) return;
 
-    const attachmentLines = files.map((file) => `- ${file.name}`);
-    const attachmentBlock = attachmentLines.length > 0
-      ? `\n\nAttachments:\n${attachmentLines.join('\n')}`
-      : '';
-    const content = (text || 'Attached files') + attachmentBlock;
+    const conversationId = activeId ?? draftConversationId;
 
+    const displayContent = text || 'Attached file';
     const userMessage: ChatMessageType = {
       id: crypto.randomUUID(),
       role: 'user',
-      content,
+      content: files.length > 0 ? `${displayContent} [${files[0].name}]` : displayContent,
       createdAt: new Date(),
     };
 
@@ -91,22 +107,28 @@ export function ChatPage(): JSX.Element {
     setInput('');
     setSocketError(null);
 
-    const assistantId = crypto.randomUUID();
-    const assistantMessage: ChatMessageType = {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      createdAt: new Date(),
-    };
+    let fileId: string | undefined;
+    if (files.length > 0) {
+      try {
+        fileId = await uploadFile(files[0], conversationId);
+      } catch {
+        setSocketError('File upload failed. Please try again.');
+        setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+        return;
+      }
+    }
 
-    setMessages((prev) => [...prev, assistantMessage]);
+    const assistantId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: 'assistant', content: '', createdAt: new Date() },
+    ]);
     setStreamingId(assistantId);
 
-    const conversationId = activeId ?? draftConversationId;
-    const wasSent = sendChatMessage({ conversationId, content });
+    const wasSent = sendChatMessage({ conversationId, content: text || 'Summarize the attached file.', fileId });
     if (!wasSent) {
       setSocketError('WebSocket is not connected yet. Please retry in a second.');
-      setMessages((prev) => prev.filter((message) => message.id !== assistantId));
+      setMessages((prev) => prev.filter((m) => m.id !== assistantId));
       setStreamingId(null);
     }
   }, [activeId, draftConversationId, input, sendChatMessage]);

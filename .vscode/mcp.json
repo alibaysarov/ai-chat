@@ -7,6 +7,10 @@
     "Prisma-Remote": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "https://mcp.prisma.io/mcp"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest", "--browser", "chrome"]
     }
   }
 }

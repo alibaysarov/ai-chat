@@ -3,6 +3,7 @@ import multer from 'multer';
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from '@ai-chat/shared';
 import { db } from '../lib/db';
 import { asyncHandler } from '../middleware/async-handler';
+import { ConversationRepository } from '../repositories/conversation.repository';
 import { FileRepository } from '../repositories/file.repository';
 import { FileService } from '../services/file-service';
 import { AppError } from '../types/app-error';
@@ -13,6 +14,7 @@ const upload = multer({
 });
 
 const fileService = new FileService(new FileRepository(db));
+const conversationRepo = new ConversationRepository(db);
 
 export const fileRouter = Router();
 
@@ -36,6 +38,12 @@ fileRouter.post(
       typeof req.body.conversationId === 'string' && req.body.conversationId.length > 0
         ? req.body.conversationId
         : undefined;
+
+    // Upsert the conversation so the FK constraint is satisfied.
+    // The client may send a draft conversationId that doesn't exist in the DB yet.
+    if (conversationId !== undefined) {
+      await conversationRepo.upsert(conversationId);
+    }
 
     const result = await fileService.uploadFile({
       buffer: req.file.buffer,
