@@ -1,3 +1,5 @@
+import type { WsToolCallEvent, WsToolResultEvent } from './tools';
+
 export type ClientMessage =
 	| {
 			type: 'chat:send';
@@ -23,4 +25,6 @@ export type ServerMessage =
 				code: string;
 				message: string;
 			};
-		};
+		}
+	| WsToolCallEvent
+	| WsToolResultEvent;

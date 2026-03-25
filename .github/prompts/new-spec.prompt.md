@@ -2,6 +2,7 @@
 agent: agent
 model: Claude Sonnet 4.6 (copilot)
 description: "Template prompt for generating a new feature spec. Output is saved to .github/specs/active/."
+
 ---
 
 You are a senior software architect. Your task is to generate a detailed implementation specification for the feature described below.

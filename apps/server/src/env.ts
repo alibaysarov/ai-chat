@@ -17,6 +17,14 @@ const schema = z.object({
   OPENAI_API_KEY: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   CORS_ORIGINS: corsOriginsSchema.default('http://localhost:5173'),
+
+  // n8n MCP — optional; integration disabled when absent
+  N8N_MCP_URL: z.string().url().optional(),
+  N8N_MCP_API_KEY: z.string().min(1).optional(),
+
+  // Zapier MCP — optional; integration disabled when absent
+  ZAPIER_MCP_URL: z.string().url().optional(),
+  ZAPIER_MCP_API_KEY: z.string().min(1).optional(),
 });
 
 export const env = schema.parse(process.env);

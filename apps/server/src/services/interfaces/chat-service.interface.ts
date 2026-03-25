@@ -1,4 +1,4 @@
-import type { Result, ChatMessage } from '@ai-chat/shared';
+import type { Result, ChatMessage, McpProvider } from '@ai-chat/shared';
 
 export interface StreamChatRequest {
   conversationId: string;
@@ -6,6 +6,8 @@ export interface StreamChatRequest {
   fileId?: string;
   signal?: AbortSignal;
   onChunk: (content: string) => void;
+  onToolCall?: (toolName: string, args: Record<string, unknown>, messageId: string, provider: McpProvider) => void;
+  onToolResult?: (toolName: string, result: string, ok: boolean, messageId: string, provider: McpProvider) => void;
 }
 
 export interface StreamChatResponse {

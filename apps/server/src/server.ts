@@ -7,13 +7,23 @@ import {
   type ServerMessage,
 } from '@ai-chat/shared';
 import { db } from './lib/db';
-import { ConversationRepository, MessageRepository, FileRepository } from './repositories';
+import { n8nMcpClient } from './lib/n8n-mcp-client';
+import { zapierMcpClient } from './lib';
+import {
+  ConversationRepository,
+  MessageRepository,
+  FileRepository,
+  ToolCallLogRepository,
+} from './repositories';
 import { ChatService } from './services';
 
 const chatService = new ChatService(
   new ConversationRepository(db),
   new MessageRepository(db),
   new FileRepository(db),
+  n8nMcpClient,
+  new ToolCallLogRepository(db),
+  zapierMcpClient,
 );
 
 function sendMessage(socket: WebSocket, message: ServerMessage): void {
@@ -69,6 +79,12 @@ wss.on('connection', (socket: WebSocket, req) => {
           type: 'chat:chunk',
           payload: { content },
         });
+      },
+      onToolCall: (toolName, args, messageId, provider) => {
+        sendMessage(socket, { type: 'chat:tool_call', toolName, args, messageId, provider });
+      },
+      onToolResult: (toolName, result, ok, messageId, provider) => {
+        sendMessage(socket, { type: 'chat:tool_result', toolName, result, ok, messageId, provider });
       },
     });
 

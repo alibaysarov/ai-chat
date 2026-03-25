@@ -37,4 +37,17 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('error'),
     payload: z.object({ code: z.string(), message: z.string() }),
   }),
+  z.object({
+    type: z.literal('chat:tool_call'),
+    toolName: z.string(),
+    args: z.record(z.unknown()),
+    messageId: z.string(),
+  }),
+  z.object({
+    type: z.literal('chat:tool_result'),
+    toolName: z.string(),
+    result: z.string(),
+    ok: z.boolean(),
+    messageId: z.string(),
+  }),
 ]);

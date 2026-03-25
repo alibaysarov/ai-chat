@@ -53,3 +53,6 @@ packages/
 ## Enviroment variables
 - Duplicate variables to .env.example
 - Use envs for secrets and necessary values
+## npm commands
+- execute them in related docker compose containers
+- do not do npm without docker

@@ -22,6 +22,7 @@ model Conversation {
   updatedAt       DateTime         @updatedAt @map("updated_at")
   messages        Message[]
   fileAttachments FileAttachment[]
+  toolCallLogs    ToolCallLog[]
 
   @@map("conversations")
 }
@@ -50,4 +51,22 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@map("messages")
+}
+
+model ToolCallLog {
+  id             String       @id @default(cuid())
+  conversationId String       @map("conversation_id")
+  messageId      String       @map("message_id")
+  toolName       String       @map("tool_name")
+  args           Json
+  result         String?      @db.Text
+  ok             Boolean
+  durationMs     Int          @map("duration_ms")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("tool_call_logs")
 }
