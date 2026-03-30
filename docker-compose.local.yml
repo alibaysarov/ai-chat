@@ -37,7 +37,6 @@ services:
     volumes:
       - ./apps/server:/app/apps/server
       - ./packages/shared:/app/packages/shared
-      # Prevent host node_modules from overriding container's
       - /app/node_modules
       - /app/apps/server/node_modules
     depends_on:
